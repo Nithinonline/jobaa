@@ -1,0 +1,13 @@
+llm:
+  provider: "groq"
+  available_providers: ["groq", "ollama"]
+  groq:
+    model: "llama-3.1-8b-instant"
+    api_key: "${GROQ_API_KEY}"
+  ollama:
+    model: "llama3.2"
+    base_url: "http://localhost:11434"
+thresholds:
+  match_score: 70
+  ats_score: 95
+  max_iterations: 3
