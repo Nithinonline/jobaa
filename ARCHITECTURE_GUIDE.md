@@ -4,21 +4,20 @@
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│                     STREAMLIT FRONTEND                             │
+│                     STREAMLIT FRONTEND (app.py)                    │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │  Session Management (st.session_state)                      │  │
-│  │  - user (User object)                                       │  │
-│  │  - selected_jd_id (integer)                                 │  │
+│  │  - user, tailoring_proposals, generated_resume, ...         │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 │                                                                      │
 │  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  UI Pages (Multipage Routing)                               │  │
-│  │  ├─ Auth Screen    (login/signup)                           │  │
-│  │  ├─ Profile Page   (form with 14 fields)                    │  │
-│  │  ├─ Upload JD      (file upload + parsing)                  │  │
-│  │  ├─ Match Score    (analysis & scoring)                     │  │
-│  │  ├─ Resume Gen     (generation & export)                    │  │
-│  │  └─ History        (version tracking)                       │  │
+│  │  Single-page workflow                                       │  │
+│  │  ├─ Auth Screen                                             │  │
+│  │  ├─ Master Resume (upload → parse → review → save)          │  │
+│  │  ├─ Target Job (paste / upload JD)                          │  │
+│  │  ├─ Tailoring Agent (proposals + confirmations)             │  │
+│  │  ├─ Export (one-page ATS PDF / DOCX / Markdown)             │  │
+│  │  └─ History sidebar (ResumeVersion browser)                 │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────┘
                               │
@@ -27,46 +26,31 @@
 │                   APPLICATION SERVICES LAYER                       │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │  AUTHENTICATION SERVICE (auth/auth_config.py)               │  │
-│  │  ├─ hash_password()        [bcrypt hashing]                 │  │
-│  │  ├─ ensure_user_exists()   [registration with validation]   │  │
-│  │  ├─ authenticate_user()    [login verification]             │  │
-│  │  └─ logout()               [session cleanup]                 │  │
 │  └──────────────────────────────────────────────────────────────┘  │
-│                                                                      │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  MASTER RESUME (core/resume_parser.py, template_extractor)  │  │
+│  │  ├─ parse_master_resume() → ProfileData                     │  │
+│  │  └─ extract_template_config() → TemplateConfig              │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  TAILORING AGENT (core/resume_agent.py, profile_diff.py)    │  │
+│  │  ├─ analyze_tailoring_needs() → ProposedChange list         │  │
+│  │  ├─ annotate groundedness / require confirmation            │  │
+│  │  └─ generate_tailored_resume() constrained by approvals     │  │
+│  └──────────────────────────────────────────────────────────────┘  │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │  MATCHING SERVICE (core/matcher.py)                          │  │
-│  │  ├─ tokenize()                [text → token extraction]     │  │
-│  │  ├─ compute_match_score()    [semantic + keyword scoring]   │  │
-│  │  └─ get_model()              [lazy-load transformer]        │  │
-│  │                                                               │  │
-│  │  Embedding Model:  all-MiniLM-L6-v2                         │  │
-│  │  - 384-dim vectors                                           │  │
-│  │  - Lightweight (~22 MB)                                      │  │
-│  │  - Semantic similarity optimized                            │  │
+│  │  └─ compute_match_score() [weighted skills/title/years 0–100] │  │
 │  └──────────────────────────────────────────────────────────────┘  │
-│                                                                      │
 │  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  ATS SCORING SERVICE (core/ats_scorer.py)                   │  │
-│  │  ├─ score_resume()          [calculate ATS compatibility]   │  │
-│  │  ├─ keyword_extraction()    [JD term identification]        │  │
-│  │  └─ section_detection()     [resume structure analysis]     │  │
-│  │                                                               │  │
-│  │  Scoring Components:                                         │  │
-│  │  - Keyword Density:    50%                                   │  │
-│  │  - Section Presence:   25%                                   │  │
-│  │  - Qualitative (LLM):  25%                                   │  │
+│  │  ATS SCORING + PDF EXPORT                                   │  │
+│  │  ├─ core/ats_scorer.py                                      │  │
+│  │  ├─ core/resume_generator.py (iterative refinement)         │  │
+│  │  └─ core/pdf_exporter.py (ReportLab + TemplateConfig)       │  │
 │  └──────────────────────────────────────────────────────────────┘  │
-│                                                                      │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │  LLM CLIENT SERVICE (core/llm_client.py)                    │  │
-│  │  ├─ generate()              [unified LLM interface]         │  │
-│  │  ├─ _generate_with_groq()   [Groq API calls]               │  │
-│  │  └─ _generate_with_ollama() [Ollama HTTP calls]            │  │
-│  │                                                               │  │
-│  │  Configuration:                                              │  │
 │  │  - Provider: groq (primary) | ollama (fallback)             │  │
-│  │  - Temperature: 0.2 (deterministic)                         │  │
-│  │  - Timeout: 120s (Ollama)                                   │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────┘
                               │
@@ -120,15 +104,6 @@
 │  │  └─ weasyprint      [Resume PDF export]                     │  │
 │  │     - Input: HTML (converted from Markdown)                 │  │
 │  │     - Output: Styled PDF                                    │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                                                      │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  NLP EMBEDDING                                               │  │
-│  │  └─ HuggingFace Sentence Transformers                        │  │
-│  │     - Model: all-MiniLM-L6-v2 (lazy-loaded)                 │  │
-│  │     - Size: ~300 MB (on first run)                          │  │
-│  │     - Cache: ~/.cache/huggingface                           │  │
-│  │     - Task: Semantic similarity scoring                     │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────┘
 ```
@@ -520,38 +495,20 @@ Upload file
 ```
 app.py
 ├─ auth/auth_config.py
-│  └─ streamlit_authenticator
-├─ db/session.py
-│  └─ SQLAlchemy
-├─ pages/profile.py
-│  └─ db/session.py
-├─ pages/upload_jd.py
-│  ├─ pdfplumber
-│  ├─ python-docx
-│  ├─ core/llm_client.py
-│  └─ db/session.py
-├─ pages/match_score.py
-│  ├─ core/matcher.py
-│  ├─ core/llm_client.py
-│  └─ db/session.py
-├─ pages/resume_gen.py
-│  ├─ core/ats_scorer.py
-│  ├─ core/llm_client.py
-│  ├─ python-docx
-│  ├─ weasyprint
-│  └─ db/session.py
-└─ pages/history.py
-   └─ db/session.py
+├─ db/session.py / db/models.py (Profile, TailoringSession, ResumeVersion, ...)
+├─ core/resume_parser.py + template_extractor.py
+├─ core/resume_agent.py + profile_diff.py
+├─ core/matcher.py
+├─ core/jd_parser.py + cache.py
+├─ core/resume_generator.py + ats_scorer.py
+└─ core/pdf_exporter.py (ReportLab, TemplateConfig) + resume_validator.py
 
 core/matcher.py
-├─ sentence_transformers
-├─ numpy
-└─ re (standard lib)
+└─ weighted deterministic score against ProfileData (no embedding required)
 
 core/ats_scorer.py
 ├─ core/llm_client.py
-├─ re (standard lib)
-└─ typing
+└─ re (standard lib)
 
 core/llm_client.py
 ├─ groq (conditional)
@@ -579,18 +536,7 @@ llm_client = LLMClient()  # Created once, reused everywhere
 from core.llm_client import llm_client
 ```
 
-### 2. Factory Pattern (Model Initialization)
-```python
-# core/matcher.py
-def get_model():
-    global _model
-    if _model is None:
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
-    return _model
-# Lazy-loads model only when needed
-```
-
-### 3. Strategy Pattern (LLM Providers)
+### 2. Strategy Pattern (LLM Providers)
 ```python
 # core/llm_client.py
 class LLMClient:
@@ -601,7 +547,7 @@ class LLMClient:
 # Swappable implementations
 ```
 
-### 4. Template Method Pattern (Page Rendering)
+### 3. Template Method Pattern (Page Rendering)
 ```python
 # pages/*.py
 def render_*_page():
@@ -615,7 +561,7 @@ def render_*_page():
         session.close()
 ```
 
-### 5. Repository Pattern (Database Access)
+### 4. Repository Pattern (Database Access)
 ```python
 # db/models.py + pages/*.py
 session = SessionLocal()

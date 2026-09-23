@@ -17,7 +17,7 @@ AI-powered resume tailoring app that helps job seekers optimize resumes for spec
 | Disk | 1 GB | 5 GB |
 | API key | [Groq API key](https://console.groq.com) (free tier available) | — |
 
-You also need `git` and `pip`. On first run, `sentence-transformers` downloads ML models (~300 MB).
+You also need `git` and `pip`.
 
 ---
 
@@ -115,11 +115,12 @@ streamlit run app.py --logger.level=debug
 ### 7. First-time app workflow
 
 1. **Sign up** — create a local account on the login screen.
-2. **Profile** — fill in skills, experience, education, and contact details.
+2. **Master resume** — upload a multi-page PDF/DOCX/TXT master resume (or fill the manual form). Review the parsed profile and template cues, then save.
 3. **Upload JD** — paste text or upload a PDF/DOCX job description.
-4. **Match score** — review semantic and keyword fit (default threshold: 70%).
-5. **Generate resume** — create a tailored resume and export as PDF, DOCX, or Markdown.
-6. **History** — browse saved resume versions.
+4. **Tailoring agent** — review proposed changes (new skills, bullet rewrites, role inclusion). Approve, reject, or edit each item. Anything not in your master resume requires confirmation.
+5. **Match score** — if profile–JD fit is below the threshold (default 70%), acknowledge to continue.
+6. **Generate resume** — create a constrained one-page ATS PDF that follows your master template section order/style.
+7. **History** — browse and reload saved resume versions from the sidebar.
 
 ---
 
@@ -172,13 +173,21 @@ thresholds:
 
 ```
 jobaa/
-├── app.py                 # Main Streamlit entry point
+├── app.py                 # Main Streamlit entry point (master resume + agent UI)
 ├── config.yaml            # LLM and threshold configuration
 ├── requirements.txt       # Python dependencies
 ├── auth/                  # Login and signup
-├── core/                  # Matching, ATS scoring, LLM, PDF export
+├── core/                  # Resume agent, parsing, matching, ATS, PDF export
+│   ├── resume_parser.py   # Master resume → structured ProfileData
+│   ├── template_extractor.py
+│   ├── resume_agent.py    # Proposals + constrained generation
+│   ├── profile_diff.py    # Groundedness / confirmation checks
+│   ├── matcher.py         # Weighted profile–JD match (skills/title/years)
+│   ├── resume_generator.py
+│   ├── pdf_exporter.py    # One-page ATS PDF (ReportLab + TemplateConfig)
+│   └── ...
 ├── db/                    # SQLAlchemy models and SQLite session
-├── pages/                 # Streamlit page modules
+├── pages/                 # Legacy Streamlit page modules (unused by app.py)
 └── tests/                 # Pytest test suite
 ```
 
@@ -193,7 +202,8 @@ jobaa/
 | `Database is locked` | Close other processes using `joba.db`, or set `JOBAA_DB_PATH` to a new file |
 | PDF export fails | Ensure `reportlab` is installed: `pip install reportlab` |
 | PDF text extraction fails | Use a PDF with selectable text, not a scanned image |
-| Slow first startup | Normal — `sentence-transformers` downloads models on first use |
+| Master resume parse fails | Prefer DOCX when possible; review/edit the structured form before saving |
+| Generate button disabled | Resolve all pending agent proposals; acknowledge low match if shown |
 
 ---
 

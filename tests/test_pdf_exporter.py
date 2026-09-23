@@ -14,6 +14,7 @@ from core.ats_scorer import validate_ats_format
 from core.pdf_exporter import (
     build_contact_lines,
     build_resume_filename,
+    _clean_generated_text,
     export_resume_docx,
     export_resume_pdf,
     generate_pdf_bytes,
@@ -95,6 +96,13 @@ def test_strip_markdown_tables_removes_table_lines() -> None:
     cleaned = strip_markdown_tables(content)
     assert "|" not in cleaned
     assert "## Skills" in cleaned
+
+
+def test_clean_generated_text_removes_markdown_and_encoding_artifacts() -> None:
+    cleaned = _clean_generated_text("**LLM**■powered model → retrieval")
+    assert cleaned == "LLM-powered model -> retrieval"
+    assert "**" not in cleaned
+    assert "■" not in cleaned
 
 
 def test_parse_markdown_blocks() -> None:

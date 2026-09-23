@@ -34,6 +34,7 @@ class User(Base):
     settings: Mapped[Optional["Settings"]] = relationship(back_populates="user", uselist=False)
     job_descriptions: Mapped[list["JobDescription"]] = relationship(back_populates="user")
     resume_versions: Mapped[list["ResumeVersion"]] = relationship(back_populates="user")
+    tailoring_sessions: Mapped[list["TailoringSession"]] = relationship(back_populates="user")
 
 
 class Profile(Base):
@@ -55,6 +56,11 @@ class Profile(Base):
     github: Mapped[Optional[str]] = mapped_column(String(300))
     linkedin: Mapped[Optional[str]] = mapped_column(String(300))
     portfolio: Mapped[Optional[str]] = mapped_column(String(300))
+    master_resume_raw_text: Mapped[Optional[str]] = mapped_column(Text)
+    master_resume_filename: Mapped[Optional[str]] = mapped_column(String(300))
+    structured_profile_json: Mapped[Optional[str]] = mapped_column(Text)
+    template_config_json: Mapped[Optional[str]] = mapped_column(Text)
+    profile_source: Mapped[Optional[str]] = mapped_column(String(50), default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -112,3 +118,20 @@ class ResumeVersion(Base):
 
     user: Mapped["User"] = relationship(back_populates="resume_versions")
     job_description: Mapped[Optional["JobDescription"]] = relationship(back_populates="resume_versions")
+
+
+class TailoringSession(Base):
+    __tablename__ = "tailoring_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    job_description_id: Mapped[Optional[int]] = mapped_column(ForeignKey("job_descriptions.id"))
+    status: Mapped[str] = mapped_column(String(50), default="analyzing")
+    proposals_json: Mapped[Optional[str]] = mapped_column(Text)
+    approved_resume_markdown: Mapped[Optional[str]] = mapped_column(Text)
+    match_score: Mapped[Optional[float]] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="tailoring_sessions")
+    job_description: Mapped[Optional["JobDescription"]] = relationship()

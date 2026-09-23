@@ -136,12 +136,19 @@ def _parse_sections(markdown: str) -> dict[str, list[str]]:
     return sections
 
 
-def reorder_and_normalize_markdown(markdown: str) -> str:
-    """Normalize section headings and reorder to canonical ATS order."""
+def reorder_and_normalize_markdown(
+    markdown: str,
+    section_order: list[str] | None = None,
+) -> str:
+    """Normalize section headings and reorder to canonical (or custom) ATS order."""
     sections = _parse_sections(markdown)
     parts: list[str] = []
+    order = section_order or CANONICAL_SECTIONS
+    # Ensure known sections still appear even if custom order omitted some
+    seen = set(order)
+    full_order = list(order) + [s for s in CANONICAL_SECTIONS if s not in seen]
 
-    for section_name in CANONICAL_SECTIONS:
+    for section_name in full_order:
         lines = sections.get(section_name, [])
         content_lines = [ln for ln in lines if ln.strip()]
         if not content_lines and section_name == "Certifications":

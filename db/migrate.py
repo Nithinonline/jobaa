@@ -8,6 +8,9 @@ from db.session import SessionLocal, engine
 
 def _add_column_if_missing(table_name: str, column_name: str, ddl: str) -> None:
     inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    if table_name not in tables:
+        return
     if column_name in [col["name"] for col in inspector.get_columns(table_name)]:
         return
     with engine.begin() as conn:
@@ -20,6 +23,12 @@ def run_migration() -> None:
     _add_column_if_missing("job_descriptions", "content_hash", "content_hash VARCHAR(64)")
     _add_column_if_missing("resume_versions", "match_score", "match_score FLOAT")
     _add_column_if_missing("resume_versions", "ats_score", "ats_score FLOAT")
+    _add_column_if_missing("tailoring_sessions", "match_score", "match_score FLOAT")
+    _add_column_if_missing("profiles", "master_resume_raw_text", "master_resume_raw_text TEXT")
+    _add_column_if_missing("profiles", "master_resume_filename", "master_resume_filename VARCHAR(300)")
+    _add_column_if_missing("profiles", "structured_profile_json", "structured_profile_json TEXT")
+    _add_column_if_missing("profiles", "template_config_json", "template_config_json TEXT")
+    _add_column_if_missing("profiles", "profile_source", "profile_source VARCHAR(50)")
 
     with SessionLocal() as session:
         for version in session.query(ResumeVersion).all():

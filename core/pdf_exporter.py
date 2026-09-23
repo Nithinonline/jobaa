@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from enum import Enum
 from io import BytesIO
@@ -502,6 +503,8 @@ def _clean_generated_text(text: str) -> str:
     if not text:
         return ""
     replacements = {
+        "\u25a0": "-",
+        "\ufffd": "-",
         "â€”": "-",
         "â€“": "-",
         "â€¢": "",
@@ -509,10 +512,18 @@ def _clean_generated_text(text: str) -> str:
         "\u2014": "-",
         "\u2013": "-",
         "\u2022": "",
+        "\u2192": "->",
     }
-    cleaned = text
+    cleaned = unicodedata.normalize("NFKC", text)
     for old, new in replacements.items():
         cleaned = cleaned.replace(old, new)
+    cleaned = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", cleaned)
+    cleaned = re.sub(r"_{1,3}([^_]+)_{1,3}", r"\1", cleaned)
+    cleaned = "".join(
+        "-" if unicodedata.category(char) == "Pd" else char
+        for char in cleaned
+    )
+    cleaned = cleaned.encode("ascii", errors="ignore").decode("ascii")
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
@@ -616,10 +627,10 @@ def _limit_skill_items(value: str, keywords: list[str] | None, max_items: int) -
 
 
 def _compact_entry(entry: ResumeEntry, index: int, *, aggressive: bool) -> ResumeEntry:
-    max_bullets = 4 if index == 0 else 1
-    max_words = 22 if aggressive else 28
+    max_bullets = 6 if index == 0 else 3
+    max_words = 20 if aggressive else 26
     if not aggressive:
-        max_bullets = 5 if index == 0 else 2
+        max_bullets = 7 if index == 0 else 3
 
     bullets = [
         _limit_words(bullet, max_words)
@@ -642,8 +653,8 @@ def compact_template_resume(
     aggressive: bool = False,
 ) -> TemplateResume:
     """Apply one-page content budgets without removing required populated sections."""
-    skill_limit = 4 if aggressive else 5
-    skill_item_limit = 7 if aggressive else 9
+    skill_limit = 6 if aggressive else 8
+    skill_item_limit = 6 if aggressive else 8
     skills = [
         (category, _limit_skill_items(value, keywords, skill_item_limit))
         for category, value in (resume.skills or [])[:skill_limit]
@@ -672,7 +683,7 @@ def compact_template_resume(
     ]
 
     return TemplateResume(
-        summary=_limit_words(resume.summary, 45 if aggressive else 60),
+        summary=_limit_words(resume.summary, 45 if aggressive else 75),
         skills=skills,
         experience=experience,
         education=education,
@@ -739,9 +750,9 @@ Hard rules:
   ## Work Experience
   ## Education
   ## Certifications
-- Professional Summary: max 45 words.
-- Skills: max 5 bullet lines, each "Category : item, item"; keep only JD-relevant skills.
-- Work Experience: max 2 roles. Current/recent role max 5 bullets. Older role max 2 bullets.
+- Professional Summary: max 75 words.
+- Skills: max 8 bullet lines, each "Category : item, item"; keep only JD-relevant skills.
+- Work Experience: max 2 roles. Current/recent role max 7 bullets. Older role max 3 bullets.
 - Education: one compact entry.
 - Certifications: max 4 bullets. Omit Certifications only if the resume has no certifications.
 - Do not create Projects or Achievements sections. Fold relevant project/achievement details into Work Experience.
@@ -782,20 +793,20 @@ def _template_job_title(job_title: str | None) -> str:
     return f"Software Engineer | {cleaned}"
 
 
-def _template_contact_items(info: ContactInfo) -> list[tuple[str, str, str | None]]:
-    items: list[tuple[str, str, str | None]] = []
+def _template_contact_items(info: ContactInfo) -> list[tuple[str | None, str, str | None]]:
+    items: list[tuple[str | None, str, str | None]] = []
     if info.email:
-        items.append(("E", info.email, f"mailto:{info.email}"))
+        items.append((None, info.email, f"mailto:{info.email}"))
     if info.phone:
-        items.append(("P", info.phone, None))
+        items.append((None, info.phone, None))
     if info.location:
-        items.append(("L", info.location, None))
+        items.append((None, info.location, None))
     if info.linkedin:
         url = normalize_linkedin_url(info.linkedin)
-        display = info.name.title() if info.name else info.linkedin.replace("https://", "").replace("http://", "")
-        items.append(("in", display, url))
+        display = url.replace("https://", "").replace("http://", "")
+        items.append((None, display, url))
     elif info.portfolio:
-        items.append(("W", info.portfolio, info.portfolio))
+        items.append((None, info.portfolio, info.portfolio))
     return items
 
 
@@ -875,7 +886,7 @@ def _append_template_entries(elements: list, entries: list[ResumeEntry], styles:
         for line in entry.extra_lines or []:
             elements.append(Paragraph(_escape_xml(line), body_style))
         for bullet in entry.bullets or []:
-            elements.append(Paragraph(_escape_xml(bullet), bullet_style, bulletText=chr(8226)))
+            elements.append(Paragraph(_escape_xml(bullet), bullet_style, bulletText="-"))
         if entry_index < len(entries) - 1:
             elements.append(Spacer(1, 0.045 * inch))
 
@@ -888,7 +899,7 @@ def _append_template_certifications(elements: list, certifications: list[str], s
     for index in range(0, len(certifications), columns):
         row: list[Paragraph] = []
         for item in certifications[index:index + columns]:
-            row.append(Paragraph(_escape_xml(item), style, bulletText=chr(8226)))
+            row.append(Paragraph(_escape_xml(item), style, bulletText="-"))
         while len(row) < columns:
             row.append(Paragraph("", style))
         rows.append(row)
@@ -1041,6 +1052,7 @@ def _render_template_pdf_bytes(
     contact: ContactInfo,
     job_title: str | None,
     scale: TemplateScale,
+    template_config: "TemplateConfig | None" = None,
 ) -> bytes:
     """Render already-budgeted resume content into the visual template."""
     try:
@@ -1054,14 +1066,48 @@ def _render_template_pdf_bytes(
         logger.warning("reportlab is not installed; PDF export unavailable")
         return b""
 
+    from core.template_config import TemplateConfig
+
+    cfg = template_config or TemplateConfig()
+    font_map = {
+        "Times-Roman": ("Times-Roman", "Times-Bold", "Times-Italic"),
+        "Helvetica": ("Helvetica", "Helvetica-Bold", "Helvetica-Oblique"),
+        "Courier": ("Courier", "Courier-Bold", "Courier-Oblique"),
+    }
+    body_font, bold_font, italic_font = font_map.get(
+        cfg.font_family,
+        ("Times-Roman", "Times-Bold", "Times-Italic"),
+    )
+    # Apply template sizes onto scale when provided
+    scale = TemplateScale(
+        name_size=cfg.name_font_size or scale.name_size,
+        title_size=cfg.title_font_size or scale.title_size,
+        heading_size=cfg.heading_font_size or scale.heading_size,
+        body_size=cfg.body_font_size or scale.body_size,
+        body_leading=(cfg.body_font_size or scale.body_size) + 0.8,
+        skill_size=cfg.skill_font_size or scale.skill_size,
+        skill_leading=(cfg.skill_font_size or scale.skill_size) + 0.7,
+        contact_size=scale.contact_size,
+        entry_size=scale.entry_size,
+        org_size=scale.org_size,
+        right_size=scale.right_size,
+        bullet_size=scale.bullet_size,
+        bullet_leading=scale.bullet_leading,
+        cert_size=scale.cert_size,
+        section_gap_inches=scale.section_gap_inches,
+    )
+
     pdf_buffer = BytesIO()
     page_width, _page_height = A4
-    left_margin = 0.63 * inch
-    right_margin = 0.63 * inch
-    top_margin = 0.38 * inch
-    bottom_margin = 0.36 * inch
+    left_margin = cfg.margin_inches * inch if cfg.margin_inches else 0.5 * inch
+    right_margin = cfg.margin_inches * inch if cfg.margin_inches else 0.5 * inch
+    top_margin = 0.3 * inch
+    bottom_margin = 0.3 * inch
     content_width = page_width - left_margin - right_margin
-    blue = colors.HexColor("#365f7f")
+    try:
+        primary = colors.HexColor(cfg.primary_color or "#365f7f")
+    except Exception:
+        primary = colors.HexColor("#365f7f")
     doc = SimpleDocTemplate(
         pdf_buffer,
         pagesize=A4,
@@ -1073,15 +1119,15 @@ def _render_template_pdf_bytes(
 
     name_style = ParagraphStyle(
         "TemplateName",
-        fontName="Times-Bold",
+        fontName=bold_font,
         fontSize=scale.name_size,
         leading=scale.name_size + 2,
         spaceAfter=2,
-        textColor=blue,
+        textColor=primary,
     )
     title_style = ParagraphStyle(
         "TemplateTitle",
-        fontName="Times-Italic",
+        fontName=italic_font,
         fontSize=scale.title_size,
         leading=scale.title_size + 2,
         spaceAfter=6,
@@ -1089,15 +1135,15 @@ def _render_template_pdf_bytes(
     )
     heading_style = ParagraphStyle(
         "TemplateHeading",
-        fontName="Times-Bold",
+        fontName=bold_font,
         fontSize=scale.heading_size,
         leading=scale.heading_size + 1,
         spaceAfter=1,
-        textColor=blue,
+        textColor=primary,
     )
     body_style = ParagraphStyle(
         "TemplateBody",
-        fontName="Times-Roman",
+        fontName=body_font,
         fontSize=scale.body_size,
         leading=scale.body_leading,
         spaceAfter=1,
@@ -1112,28 +1158,28 @@ def _render_template_pdf_bytes(
     )
     contact_style = ParagraphStyle(
         "TemplateContact",
-        fontName="Times-Roman",
+        fontName=body_font,
         fontSize=scale.contact_size,
         leading=scale.contact_size + 1,
         textColor=colors.black,
         )
     icon_style = ParagraphStyle(
         "TemplateContactIcon",
-        fontName="Times-Bold",
+        fontName=bold_font,
         fontSize=max(7.5, scale.contact_size - 0.5),
         leading=scale.contact_size + 1,
-        textColor=blue,
+        textColor=primary,
     )
     entry_title_style = ParagraphStyle(
         "TemplateEntryTitle",
-        fontName="Times-Bold",
+        fontName=bold_font,
         fontSize=scale.entry_size,
         leading=scale.entry_size + 1,
         textColor=colors.black,
     )
     org_style = ParagraphStyle(
         "TemplateOrg",
-        fontName="Times-Italic",
+        fontName=italic_font,
         fontSize=scale.org_size,
         leading=scale.org_size + 0.8,
         spaceAfter=0,
@@ -1141,7 +1187,7 @@ def _render_template_pdf_bytes(
     )
     right_style = ParagraphStyle(
         "TemplateRight",
-        fontName="Times-Roman",
+        fontName=body_font,
         fontSize=scale.right_size,
         leading=scale.right_size + 1,
         alignment=TA_RIGHT,
@@ -1149,7 +1195,7 @@ def _render_template_pdf_bytes(
     )
     bullet_style = ParagraphStyle(
         "TemplateBullet",
-        fontName="Times-Roman",
+        fontName=body_font,
         fontSize=scale.bullet_size,
         leading=scale.bullet_leading,
         leftIndent=10,
@@ -1167,81 +1213,137 @@ def _render_template_pdf_bytes(
         rightIndent=6,
     )
 
+    headings = cfg.section_headings or dict(PDF_SECTION_DISPLAY)
+    section_order = cfg.section_order or list(CANONICAL_SECTIONS)
+
+    styles_bundle = {
+        "entry_title": entry_title_style,
+        "right": right_style,
+        "org": org_style,
+        "bullet": bullet_style,
+        "body": body_style,
+    }
+
     elements: list = []
     if contact.name:
         elements.append(Paragraph(_escape_xml(contact.name.upper()), name_style))
     elements.append(Paragraph(_escape_xml(_template_job_title(job_title)), title_style))
 
-    contact_cells: list = []
+    contact_segments: list[str] = []
     for icon, text, url in _template_contact_items(contact):
-        contact_cells.append(Paragraph(_escape_xml(icon), icon_style))
+        prefix = f"{_escape_xml(icon)}: " if icon and getattr(cfg, "use_icon_labels", False) else ""
+        display = f"{prefix}{_escape_xml(text)}"
         if url:
-            contact_cells.append(
-                Paragraph(
-                    f'<a href="{_escape_xml(url)}" color="#000000">{_escape_xml(text)}</a>',
-                    contact_style,
+            anchor_text = _escape_xml(text)
+            display = f'{prefix}<a href="{_escape_xml(url)}" color="#000000">{anchor_text}</a>'
+        contact_segments.append(display)
+    if contact_segments:
+        separator = _escape_xml(cfg.contact_separator or " | ")
+        elements.append(Paragraph(separator.join(contact_segments), contact_style))
+
+    def _heading_label(canonical: str) -> str:
+        return headings.get(canonical) or PDF_SECTION_DISPLAY.get(canonical, canonical.upper())
+
+    for section_name in section_order:
+        if section_name == "Professional Summary" and resume.summary:
+            elements.extend(
+                _template_section_heading(
+                    _heading_label("Professional Summary"),
+                    heading_style,
+                    colors.black,
+                    scale.section_gap_inches,
                 )
             )
-        else:
-            contact_cells.append(Paragraph(_escape_xml(text), contact_style))
-    if contact_cells:
-        col_widths = _contact_col_widths(len(contact_cells) // 2, content_width)
-        contact_table = Table([contact_cells], colWidths=col_widths)
-        contact_table.hAlign = "LEFT"
-        contact_table.setStyle(
-            TableStyle(
-                [
-                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                    ("TOPPADDING", (0, 0), (-1, -1), 0),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ]
+            elements.append(Paragraph(_escape_xml(resume.summary), body_style))
+        elif section_name == "Skills" and resume.skills:
+            elements.extend(
+                _template_section_heading(
+                    _heading_label("Skills"),
+                    heading_style,
+                    colors.black,
+                    scale.section_gap_inches,
+                )
+            )
+            for category, value in resume.skills:
+                elements.append(_bold_prefix_paragraph(category, value, skill_style))
+        elif section_name == "Work Experience" and resume.experience:
+            elements.extend(
+                _template_section_heading(
+                    _heading_label("Work Experience"),
+                    heading_style,
+                    colors.black,
+                    scale.section_gap_inches,
+                )
+            )
+            _append_template_entries(elements, resume.experience, styles_bundle, content_width)
+        elif section_name == "Education" and resume.education:
+            elements.extend(
+                _template_section_heading(
+                    _heading_label("Education"),
+                    heading_style,
+                    colors.black,
+                    scale.section_gap_inches,
+                )
+            )
+            _append_template_entries(elements, resume.education, styles_bundle, content_width)
+        elif section_name == "Certifications" and resume.certifications:
+            elements.extend(
+                _template_section_heading(
+                    _heading_label("Certifications"),
+                    heading_style,
+                    colors.black,
+                    scale.section_gap_inches,
+                )
+            )
+            _append_template_certifications(elements, resume.certifications, cert_style, content_width)
+
+    # Ensure required populated sections still render if omitted from custom order
+    rendered = set(section_order)
+    if "Professional Summary" not in rendered and resume.summary:
+        elements.extend(
+            _template_section_heading(
+                _heading_label("Professional Summary"),
+                heading_style,
+                colors.black,
+                scale.section_gap_inches,
             )
         )
-        elements.append(contact_table)
-
-    if resume.summary:
-        elements.extend(_template_section_heading("PROFESSIONAL SUMMARY", heading_style, colors.black, scale.section_gap_inches))
         elements.append(Paragraph(_escape_xml(resume.summary), body_style))
-
-    if resume.skills:
-        elements.extend(_template_section_heading("SKILLS", heading_style, colors.black, scale.section_gap_inches))
+    if "Skills" not in rendered and resume.skills:
+        elements.extend(
+            _template_section_heading(_heading_label("Skills"), heading_style, colors.black, scale.section_gap_inches)
+        )
         for category, value in resume.skills:
             elements.append(_bold_prefix_paragraph(category, value, skill_style))
-
-    if resume.experience:
-        elements.extend(_template_section_heading("EXPERIENCE", heading_style, colors.black, scale.section_gap_inches))
-        _append_template_entries(
-            elements,
-            resume.experience,
-            {
-                "entry_title": entry_title_style,
-                "right": right_style,
-                "org": org_style,
-                "bullet": bullet_style,
-                "body": body_style,
-            },
-            content_width,
+    if "Work Experience" not in rendered and resume.experience:
+        elements.extend(
+            _template_section_heading(
+                _heading_label("Work Experience"),
+                heading_style,
+                colors.black,
+                scale.section_gap_inches,
+            )
         )
-
-    if resume.education:
-        elements.extend(_template_section_heading("EDUCATION", heading_style, colors.black, scale.section_gap_inches))
-        _append_template_entries(
-            elements,
-            resume.education,
-            {
-                "entry_title": entry_title_style,
-                "right": right_style,
-                "org": org_style,
-                "bullet": bullet_style,
-                "body": body_style,
-            },
-            content_width,
+        _append_template_entries(elements, resume.experience, styles_bundle, content_width)
+    if "Education" not in rendered and resume.education:
+        elements.extend(
+            _template_section_heading(
+                _heading_label("Education"),
+                heading_style,
+                colors.black,
+                scale.section_gap_inches,
+            )
         )
-
-    if resume.certifications:
-        elements.extend(_template_section_heading("CERTIFICATIONS", heading_style, colors.black, scale.section_gap_inches))
+        _append_template_entries(elements, resume.education, styles_bundle, content_width)
+    if "Certifications" not in rendered and resume.certifications:
+        elements.extend(
+            _template_section_heading(
+                _heading_label("Certifications"),
+                heading_style,
+                colors.black,
+                scale.section_gap_inches,
+            )
+        )
         _append_template_certifications(elements, resume.certifications, cert_style, content_width)
 
     if not elements:
@@ -1264,9 +1366,17 @@ def generate_pdf_bytes(
     *,
     profile_text: str | None = None,
     rewrite_for_one_page: bool = False,
+    template_config: "TemplateConfig | None" = None,
 ) -> bytes | None:
     """Convert Markdown resume to a validated one-page visual PDF template."""
+    from core.template_config import TemplateConfig, template_config_from_json
+
     contact = build_contact_info(profile)
+    cfg = template_config
+    if cfg is None and profile is not None and getattr(profile, "template_config_json", None):
+        cfg = template_config_from_json(profile.template_config_json)
+    if cfg is None:
+        cfg = TemplateConfig()
 
     source_markdown = markdown_content
     if rewrite_for_one_page:
@@ -1282,7 +1392,9 @@ def generate_pdf_bytes(
         logger.warning("PDF export missing required template sections before render")
 
     try:
-        pdf_bytes = _render_template_pdf_bytes(resume, contact, job_title, DEFAULT_TEMPLATE_SCALE)
+        pdf_bytes = _render_template_pdf_bytes(
+            resume, contact, job_title, DEFAULT_TEMPLATE_SCALE, template_config=cfg
+        )
     except RuntimeError:
         raise
     if not pdf_bytes:
@@ -1290,10 +1402,14 @@ def generate_pdf_bytes(
 
     if _pdf_page_count(pdf_bytes) > 1:
         resume = compact_template_resume(resume, expected_keywords, aggressive=True)
-        pdf_bytes = _render_template_pdf_bytes(resume, contact, job_title, COMPACT_TEMPLATE_SCALE)
+        pdf_bytes = _render_template_pdf_bytes(
+            resume, contact, job_title, COMPACT_TEMPLATE_SCALE, template_config=cfg
+        )
 
     while _pdf_page_count(pdf_bytes) > 1 and _trim_one_experience_bullet(resume):
-        pdf_bytes = _render_template_pdf_bytes(resume, contact, job_title, COMPACT_TEMPLATE_SCALE)
+        pdf_bytes = _render_template_pdf_bytes(
+            resume, contact, job_title, COMPACT_TEMPLATE_SCALE, template_config=cfg
+        )
 
     ok, issues = _validate_export(pdf_bytes, "pdf", expected_keywords)
     if not ok:
