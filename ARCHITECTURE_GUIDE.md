@@ -1,577 +1,85 @@
-# Joba - Architecture & Components Deep Dive
+# Joba Architecture
 
-## System Architecture Diagram
+## Current system
 
-```
-┌────────────────────────────────────────────────────────────────────┐
-│                     STREAMLIT FRONTEND (app.py)                    │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  Session Management (st.session_state)                      │  │
-│  │  - user, tailoring_proposals, generated_resume, ...         │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                                                      │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  Single-page workflow                                       │  │
-│  │  ├─ Auth Screen                                             │  │
-│  │  ├─ Master Resume (upload → parse → review → save)          │  │
-│  │  ├─ Target Job (paste / upload JD)                          │  │
-│  │  ├─ Tailoring Agent (proposals + confirmations)             │  │
-│  │  ├─ Export (one-page ATS PDF / DOCX / Markdown)             │  │
-│  │  └─ History sidebar (ResumeVersion browser)                 │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                   APPLICATION SERVICES LAYER                       │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  AUTHENTICATION SERVICE (auth/auth_config.py)               │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  MASTER RESUME (core/resume_parser.py, template_extractor)  │  │
-│  │  ├─ parse_master_resume() → ProfileData                     │  │
-│  │  └─ extract_template_config() → TemplateConfig              │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  TAILORING AGENT (core/resume_agent.py, profile_diff.py)    │  │
-│  │  ├─ analyze_tailoring_needs() → ProposedChange list         │  │
-│  │  ├─ annotate groundedness / require confirmation            │  │
-│  │  └─ generate_tailored_resume() constrained by approvals     │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  MATCHING SERVICE (core/matcher.py)                          │  │
-│  │  └─ compute_match_score() [weighted skills/title/years 0–100] │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  ATS SCORING + PDF EXPORT                                   │  │
-│  │  ├─ core/ats_scorer.py                                      │  │
-│  │  ├─ core/resume_generator.py (iterative refinement)         │  │
-│  │  └─ core/pdf_exporter.py (ReportLab + TemplateConfig)       │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  LLM CLIENT SERVICE (core/llm_client.py)                    │  │
-│  │  - Provider: groq (primary) | ollama (fallback)             │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                      DATABASE LAYER                                │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  ORM: SQLAlchemy 2.0 (db/models.py)                         │  │
-│  │  Database: SQLite (file-based)                              │  │
-│  │  Session: db/session.py (connection management)             │  │
-│  │                                                               │  │
-│  │  Tables:                                                     │  │
-│  │  ├─ users           (authentication data)                    │  │
-│  │  ├─ profiles        (user profile content)                   │  │
-│  │  ├─ job_descriptions (parsed JD data)                       │  │
-│  │  └─ resume_versions (generated resumes + scores)            │  │
-│  │                                                               │  │
-│  │  Storage: ./jobaa.db (grows with usage)                     │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                   EXTERNAL SERVICES                                │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  LLM INFERENCE                                               │  │
-│  │  ├─ Groq Cloud         [Fast: ~1s, Temperature: 0.2]        │  │
-│  │  │  - Endpoint: Proprietary (via SDK)                       │  │
-│  │  │  - Model: llama-3.1-8b-instant                           │  │
-│  │  │  - Auth: GROQ_API_KEY environment variable              │  │
-│  │  │  - Pricing: Pay-as-you-go (~$0.02/request)             │  │
-│  │  │                                                           │  │
-│  │  └─ Ollama Local       [Flexible: ~10-30s]                  │  │
-│  │     - Endpoint: http://localhost:11434/api/generate         │  │
-│  │     - Model: llama3.2 (configurable)                        │  │
-│  │     - Auth: None (local)                                    │  │
-│  │     - Cost: Free (hardware dependent)                       │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                                                      │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │  FILE PROCESSING                                             │  │
-│  │  ├─ pdfplumber      [PDF text extraction]                   │  │
-│  │  │  - Method: Page-by-page extraction                       │  │
-│  │  │  - Supports: Searchable PDFs                             │  │
-│  │  │  - Temp storage: /tmp (auto-cleanup)                     │  │
-│  │  │                                                           │  │
-│  │  ├─ python-docx     [DOCX parsing]                          │  │
-│  │  │  - Method: Paragraph-level extraction                    │  │
-│  │  │  - Supports: .docx, .xlsx (via Document)                 │  │
-│  │  │                                                           │  │
-│  │  └─ weasyprint      [Resume PDF export]                     │  │
-│  │     - Input: HTML (converted from Markdown)                 │  │
-│  │     - Output: Styled PDF                                    │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────┘
+```text
+Streamlit UI (app.py)
+  ├─ Auth, profile editing, history, and export
+  └─ Tailoring service
+       ├─ JD input: pasted text | uploaded file | public HTTPS URL
+       ├─ Hybrid evidence retrieval from profile + Chroma
+       ├─ Job Posting Researcher ─┐
+       ├─ Candidate Profiler ─────┴─ parallel CrewAI tasks
+       ├─ Resume Strategist ───────── sequential CrewAI task
+       ├─ Validated selection plan → deterministic Markdown assembler
+       ├─ Match/ATS scoring
+       └─ SQLite task progress + resume version
+
+SQLite: users, profile, settings, JDs, tailoring progress, resume versions
+Chroma: rebuildable evidence index derived from the saved master profile
+LLM: configured Groq API or local Ollama provider through CrewAI
 ```
 
----
+## Product and data-integrity rules
 
-## Data Flow Diagrams
+- The structured master profile in SQLite is the source of truth.
+- Chroma is a derived index used to retrieve supporting evidence; it can be rebuilt from the profile.
+- Agents return structured requirements and selections, not resume prose.
+- Every selected skill, profile entry, and bullet is validated against the user's saved profile. Unsupported selections fail the workflow.
+- Resume Markdown is generated by `core/resume_assembler.py` from verified profile facts and the user's template settings.
+- No approval/proposal stage, interview-preparation output, or cover-letter workflow is present.
 
-### 1. User Registration Flow
-```
-User Input
-    │
-    ├─ username ──┐
-    ├─ email      ├──> ensure_user_exists()
-    └─ password ──┤
-                  └──> Validate (unique username/email)
-                        │
-                        ├─ NO ──> Error: Already exists
-                        │
-                        └─ YES ──> hash_password()
-                                   │
-                                   └──> Create User record
-                                        │
-                                        └──> Session.commit()
-                                             │
-                                             └──> Success Message
-```
+## Tailoring lifecycle
 
-### 2. Profile-JD Matching Flow
-```
-Profile Text + JD Text
-    │
-    ├──────────────────────────────────┐
-    │                                  │
-    ▼                                  ▼
-compute_keyword_score()        compute_semantic_score()
-    │                                  │
-    ├─ tokenize(profile)              ├─ Encode(profile)
-    ├─ tokenize(jd)                   ├─ Encode(jd)
-    └─ intersection / union           └─ Cosine Similarity
-        │                                 │
-        └─ % value (0-100)              └─ % value (0-100)
-                                            │
-Final Score = (semantic × 0.7) + (keyword × 0.3)
-                │
-                └──> 0-100% Match Score
-```
+1. Normalize JD text or fetch/parse an uploaded or linked posting.
+2. Create or reuse the user's hashed JD record and create a tailoring-session row with all agent states set to `queued`.
+3. Retrieve matching evidence from the structured profile and Chroma index.
+4. Run job research and candidate profiling concurrently. Persist each `running`, `completed`, or `failed` transition.
+5. Run the resume strategist after the two parallel tasks finish.
+6. Validate all selections against profiler-approved indices and original profile values.
+7. Assemble Markdown deterministically, calculate match and ATS scores, save a resume version, and mark the session `complete`.
+8. On error, persist `failed` status and the active agent's diagnostic detail before propagating the error to the UI.
 
-### 3. Resume Generation Loop
-```
-User Triggers Generation
-    │
-    └──> Check Match Score ≥ 70%
-        ├─ NO ──> BLOCKED
-        │
-        └─ YES ──> Iteration Loop (max 3)
-                    │
-                    ├─ i=1 ──> Generate resume v1
-                    ├─ i=2 ──> Improve resume v2
-                    └─ i=3 ──> Final tune resume v3
-                        │
-                        For each iteration:
-                        ├─ LLM generation
-                        ├─ Calculate ATS score
-                        ├─ Store ResumeVersion
-                        ├─ Check ATS ≥ 95?
-                        │  ├─ YES ──> STOP
-                        │  └─ NO ──> Continue
-                        └─ Export (PDF/DOCX/Markdown)
-```
+Agent progress is stored in `tailoring_sessions.agent_progress_json` and streamed to the current Streamlit run through a callback. The UI reports named lifecycle states and details; it does not invent percentage completion.
 
-### 4. File Upload & Parsing Flow
-```
-User Uploads File
-    │
-    ├─ PDF ──> pdfplumber
-    │          │
-    │          ├─ Create temp file
-    │          ├─ Extract pages
-    │          ├─ Join text
-    │          └─ Delete temp file
-    │
-    ├─ DOCX ──> python-docx
-    │          │
-    │          ├─ Create temp file
-    │          ├─ Load Document
-    │          ├─ Extract paragraphs
-    │          └─ Delete temp file
-    │
-    └─ TXT ──> Direct decode
-               │
-               └─ UTF-8 decode
-                   │
-                   └─ Store raw_text
-                        │
-                        ├─> LLM parse to structured fields
-                        │   (skills, responsibilities, keywords)
-                        │
-                        └─> Create JobDescription record
-```
+## Job description inputs
 
----
+- **Pasted text:** used directly as the posting content.
+- **Uploaded document:** PDF, DOCX, or TXT extraction follows the existing file parsing path.
+- **Public link:** the fetcher requires HTTPS and the standard port, rejects DNS results that are private or reserved, checks each redirect target, caps redirects at three, and caps response size at 2 MB. HTML is converted to readable text.
 
-## Component Interaction Matrix
+## Matching and exports
 
-| Component | Auth | Matcher | ATS Scorer | LLM Client | DB |
-|-----------|------|---------|-----------|-----------|-----|
-| **Auth** | - | ❌ | ❌ | ❌ | ✅ |
-| **Matcher** | ❌ | - | ❌ | ❌ | ❌ |
-| **ATS Scorer** | ❌ | ❌ | - | ✅ | ❌ |
-| **LLM Client** | ❌ | ❌ | ✅ | - | ❌ |
-| **Profile Page** | ✅ | ❌ | ❌ | ❌ | ✅ |
-| **Upload JD** | ✅ | ❌ | ❌ | ✅ | ✅ |
-| **Match Score** | ✅ | ✅ | ❌ | ✅ | ✅ |
-| **Resume Gen** | ✅ | ❌ | ✅ | ✅ | ✅ |
-| **History** | ✅ | ❌ | ❌ | ❌ | ✅ |
+- `core/matcher.py` calculates a deterministic profile-to-JD score using required skills, preferred skills, title, and experience.
+- `core/ats_scorer.py` reports ATS-oriented score and missing keywords.
+- The profile retrieval layer combines Chroma results with alias-aware skill and bullet matches.
+- PDF/DOCX/Markdown exports and version history are retained independently from agent orchestration.
 
----
+## Data model
 
-## Configuration Loading Order
+| Table | Purpose |
+|---|---|
+| `users` | Local user accounts |
+| `profiles` | Saved master profile, imported source text, and template settings |
+| `settings` | Per-user LLM provider/model credentials |
+| `job_descriptions` | Original JD text, optional source URL, and extracted role fields |
+| `tailoring_sessions` | Current workflow status, agent progress, generated Markdown, and match score |
+| `resume_versions` | Scored, exportable resume versions |
 
-```
-1. app.py starts
-    │
-    └──> config.yaml parsed (PyYAML)
-        │
-        ├─ llm.provider = "groq" or "ollama"
-        │
-        ├─ llm.groq.model = "llama-3.1-8b-instant"
-        ├─ llm.groq.api_key = ${GROQ_API_KEY} (env var)
-        │
-        ├─ llm.ollama.model = "llama3.2"
-        ├─ llm.ollama.base_url = "http://localhost:11434"
-        │
-        └─ thresholds
-            ├─ match_score = 70
-            ├─ ats_score = 95
-            └─ max_iterations = 3
-```
+## Main modules
 
----
+| Path | Responsibility |
+|---|---|
+| `app.py` | Streamlit UI, JD inputs, task progress, profile/history/export surfaces |
+| `core/application_crew.py` | CrewAI roles, structured output schemas, parallel stages, validation, and selection application |
+| `core/job_source.py` | Safe public posting fetch and content normalization |
+| `core/services/tailoring_service.py` | Workflow lifecycle, database persistence, scoring, and failure handling |
+| `core/retriever.py` | Hybrid evidence retrieval from profile facts and Chroma |
+| `core/resume_assembler.py` | Deterministic Markdown rendering |
+| `core/matcher.py` | Deterministic fit scoring |
+| `core/ats_scorer.py` | ATS-oriented scoring and keyword diagnostics |
+| `db/models.py`, `db/migrate.py` | SQLAlchemy schema and additive migrations |
 
-## Request/Response Cycle: Resume Generation
+## Configuration
 
-### Phase 1: Request Preparation
-```
-User clicks "Generate Resume"
-    │
-    ├─ Fetch Profile (name, skills, experience, etc.)
-    ├─ Fetch JobDescription (title, skills, requirements)
-    ├─ Concatenate texts
-    └─ Build prompt template
-```
-
-### Phase 2: LLM Call
-```
-Prompt sent to LLM
-    │
-    ├─ If Groq:
-    │  ├─ Groq(api_key=GROQ_API_KEY)
-    │  ├─ chat.completions.create()
-    │  ├─ Temperature: 0.2
-    │  └─ Response: < 1 second
-    │
-    └─ If Ollama:
-       ├─ requests.post(http://localhost:11434/api/generate)
-       ├─ stream: false
-       ├─ Timeout: 120s
-       └─ Response: 10-30 seconds
-```
-
-### Phase 3: Processing
-```
-Response received
-    │
-    ├─ Parse Markdown resume
-    ├─ Calculate ATS score
-    ├─ Extract missing keywords
-    ├─ Create ResumeVersion record
-    └─ Store in database
-```
-
-### Phase 4: Display
-```
-Results shown to user
-    │
-    ├─ Display resume preview
-    ├─ Show ATS score
-    ├─ List improvements
-    └─ Export options (PDF, DOCX, Markdown)
-```
-
----
-
-## Performance Optimization Strategies
-
-### 1. Caching
-```
-Sentence Transformer Model:
-- Lazy loaded on first use
-- Cached in memory (st.cache_resource)
-- ~300 MB (one-time load)
-
-LLM Responses:
-- Not cached (varies by input)
-- Consider implementing Redis for production
-
-Database Queries:
-- Use SQLAlchemy query optimization
-- Index on: user_id, username, email
-```
-
-### 2. Async Operations
-```
-Current: Synchronous (one request at a time)
-
-Potential improvements:
-- Use asyncio for concurrent requests
-- Queue system for resume generation
-- Background jobs for PDF export
-```
-
-### 3. Resource Limits
-```
-File Upload: < 50 MB
-PDF Pages: Process all (no limit)
-Text Length: 50,000 characters max
-Concurrent Users: Limited by server RAM
-Resume Iterations: 3 max (cost control)
-```
-
----
-
-## Error Handling Strategy
-
-```
-Layer 1: User Input Validation
-├─ Streamlit built-in validation
-├─ Custom validation in form handlers
-└─ Error messages to user
-
-Layer 2: Authentication Errors
-├─ Invalid credentials → "Incorrect username/password"
-├─ Account exists → "Username already taken"
-└─ DB errors → Generic error message
-
-Layer 3: API Errors
-├─ Groq key missing → "Groq API key not configured"
-├─ Ollama offline → "Ollama service not available"
-├─ Network timeout → "Request timed out, please try again"
-└─ Malformed response → "Unexpected response format"
-
-Layer 4: Database Errors
-├─ Connection fail → "Database connection error"
-├─ Lock timeout → "Database busy, try again"
-└─ Data validation → "Invalid data, check input"
-
-Layer 5: File Processing Errors
-├─ PDF corrupted → "Cannot extract text from PDF"
-├─ DOCX malformed → "Invalid Word document"
-├─ File too large → "File exceeds size limit"
-└─ Encoding issues → "Cannot decode file content"
-```
-
----
-
-## Security Implementation Details
-
-### Password Security
-```
-User enters password
-    │
-    ├─> stauth.Hasher().hash(password)
-    │   └─ bcrypt algorithm (salt + hash)
-    │
-    └─> Store password_hash in database
-        (original password NEVER stored)
-        │
-        └─> On login: stauth.Hasher().check_pw(input, hash)
-```
-
-### Session Management
-```
-User logs in
-    │
-    ├─> authenticate_user() returns User object
-    └─> st.session_state.user = user
-        │
-        └─> Available in all pages
-            │
-            └─> Protected by st.session_state checks
-```
-
-### API Key Management
-```
-Option 1: Environment Variable (Recommended)
-    export GROQ_API_KEY=gsk_xxxxx
-    (never commit to version control)
-
-Option 2: .env File
-    GROQ_API_KEY=gsk_xxxxx
-    (add .env to .gitignore)
-
-Option 3: config.yaml (Not recommended for production)
-    llm.groq.api_key: "gsk_xxxxx"
-    (visible in repo, security risk)
-```
-
-### File Handling Security
-```
-Upload file
-    │
-    ├─ Create temp file
-    ├─ Validate file type (PDF, DOCX, TXT only)
-    ├─ Validate file size (< 50 MB)
-    ├─ Process content
-    └─ Delete temp file immediately
-       (no files left on disk)
-```
-
----
-
-## Deployment Architecture Patterns
-
-### Pattern 1: Single Instance (Development)
-```
-┌─────────────────────────┐
-│   Streamlit App         │
-│  + SQLite Database      │
-│  + Local Config         │
-└────────┬────────────────┘
-         │
-         └──> Groq API (Cloud)
-              (or Ollama localhost)
-```
-
-### Pattern 2: Cloud Deployment (Small Scale)
-```
-┌─────────────────────────────────────────┐
-│        Streamlit Cloud                  │
-│    ┌──────────────────┐                 │
-│    │  Joba Container  │                 │
-│    └────────┬─────────┘                 │
-│             │                            │
-│  ┌──────────▼──────────┐                │
-│  │ SQLite / PostgreSQL │                │
-│  └────────┬────────────┘                │
-│           │                              │
-└───────────┼──────────────────────────────┘
-            │
-            ├──> Groq API
-            ├──> Ollama (optional)
-            └──> HuggingFace Models
-```
-
-### Pattern 3: Enterprise (Large Scale)
-```
-┌──────────────────────────────────────────────────┐
-│              Load Balancer (Nginx)               │
-└─────────────┬──────────────────────┬─────────────┘
-              │                      │
-    ┌─────────▼────────┐   ┌────────▼──────────┐
-    │  Joba Pod 1      │   │  Joba Pod N       │
-    │  (Kubernetes)    │   │  (Kubernetes)     │
-    └─────────┬────────┘   └────────┬──────────┘
-              │                      │
-    ┌─────────▼────────────────────┐│
-    │   PostgreSQL (Primary)       ││
-    │   Replication               ││
-    │   Backup                    ││
-    └─────────┬────────────────────┘│
-              │                      │
-    ┌─────────▼──────────┐  ┌──────▼────────────┐
-    │  Redis Cache       │  │  Ollama Cluster  │
-    │  Session Store     │  │  (Multi-GPU)     │
-    └────────────────────┘  └──────────────────┘
-              │
-              ├──> Groq API (Primary)
-              ├──> Self-hosted Ollama (Fallback)
-              ├──> Monitoring (Prometheus)
-              ├──> Logging (ELK Stack)
-              └──> CDN (static assets)
-```
-
----
-
-## Module Dependencies Graph
-
-```
-app.py
-├─ auth/auth_config.py
-├─ db/session.py / db/models.py (Profile, TailoringSession, ResumeVersion, ...)
-├─ core/resume_parser.py + template_extractor.py
-├─ core/resume_agent.py + profile_diff.py
-├─ core/matcher.py
-├─ core/jd_parser.py + cache.py
-├─ core/resume_generator.py + ats_scorer.py
-└─ core/pdf_exporter.py (ReportLab, TemplateConfig) + resume_validator.py
-
-core/matcher.py
-└─ weighted deterministic score against ProfileData (no embedding required)
-
-core/ats_scorer.py
-├─ core/llm_client.py
-└─ re (standard lib)
-
-core/llm_client.py
-├─ groq (conditional)
-├─ requests
-├─ yaml
-└─ os (standard lib)
-
-db/models.py
-├─ SQLAlchemy
-└─ datetime (standard lib)
-
-db/session.py
-└─ SQLAlchemy
-```
-
----
-
-## Key Design Patterns
-
-### 1. Singleton Pattern (Global LLM Client)
-```python
-# core/llm_client.py
-llm_client = LLMClient()  # Created once, reused everywhere
-# Usage in multiple modules
-from core.llm_client import llm_client
-```
-
-### 2. Strategy Pattern (LLM Providers)
-```python
-# core/llm_client.py
-class LLMClient:
-    def generate(self, prompt):
-        if self.provider == "ollama":
-            return self._generate_with_ollama(prompt)
-        return self._generate_with_groq(prompt)
-# Swappable implementations
-```
-
-### 3. Template Method Pattern (Page Rendering)
-```python
-# pages/*.py
-def render_*_page():
-    # Consistent structure across pages
-    st.title(...)
-    st.caption(...)
-    session = SessionLocal()
-    try:
-        # Page-specific logic
-    finally:
-        session.close()
-```
-
-### 4. Repository Pattern (Database Access)
-```python
-# db/models.py + pages/*.py
-session = SessionLocal()
-user = session.query(User).filter(...).first()
-# Centralized data access through ORM
-```
-
----
-
-**Version**: 1.0.0  
-**Last Updated**: 2026-07-02  
-**Document Type**: Architecture Reference
-
+`config.yaml` provides default Groq/Ollama model settings and local embedding/index settings. `Settings` records can override the provider/model and encrypted API key per user. CrewAI is used only for the tailoring agents; the remaining match, validation, assembly, persistence, and export stages are ordinary application code.

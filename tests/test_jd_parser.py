@@ -1,27 +1,14 @@
 import json
-from unittest.mock import patch
 
 from core.jd_parser import (
     ParsedJobDescription,
     _deserialize_list,
-    _extract_json_object,
     _serialize_list,
     format_jd_for_prompt,
     get_priority_keywords,
     job_description_to_parsed,
-    parse_job_description,
     parsed_to_db_fields,
 )
-
-
-def test_extract_json_object_from_fenced_response() -> None:
-    text = """Here is the JSON:
-```json
-{"title": "Engineer", "required_skills": ["Python", "SQL"]}
-```"""
-    data = _extract_json_object(text)
-    assert data["title"] == "Engineer"
-    assert data["required_skills"] == ["Python", "SQL"]
 
 
 def test_parsed_job_description_coerces_string_lists() -> None:
@@ -54,13 +41,6 @@ def test_parsed_to_db_fields() -> None:
     assert json.loads(fields["skills"]) == ["Python"]
     assert fields["experience"] == "3+ years"
     assert json.loads(fields["keywords"]) == ["microservices"]
-
-
-def test_parse_job_description_fallback_on_invalid_json() -> None:
-    with patch("core.jd_parser.llm_client.generate", return_value="not json at all"):
-        parsed = parse_job_description("Some job description text")
-    assert parsed.title == ""
-    assert parsed.required_skills == []
 
 
 def test_format_jd_for_prompt_prioritizes_keywords() -> None:

@@ -10,7 +10,6 @@ from core.ats_constants import (
     normalize_section_heading,
 )
 from core.jd_parser import _deserialize_list
-from core.llm_client import llm_client
 
 if TYPE_CHECKING:
     from db.models import JobDescription
@@ -62,7 +61,6 @@ def validate_ats_format(resume_text: str) -> tuple[bool, list[str]]:
     if missing:
         reasons.append(f"Missing standard heading(s): {', '.join(missing)}")
 
-    # Check date format on lines with pipe separators in experience/education context
     for line in lines:
         if "|" in line and not line.startswith("#"):
             date_part = line.split("|", 1)[-1].strip()
@@ -100,7 +98,13 @@ def score_resume(
     resume_text: str,
     jd_text: str,
     jd: JobDescription | None = None,
+    *,
+    qualitative: bool = False,
 ) -> Tuple[float, str, List[str]]:
+    """
+    Deterministic ATS-oriented score from keyword density + section presence.
+    LLM qualitative summary is opt-in (default off) to avoid extra cost.
+    """
     resume_lower = resume_text.lower()
     jd_terms = _tokenize(jd_text)
     priority_terms = _priority_terms_from_jd(jd)
@@ -113,11 +117,25 @@ def score_resume(
     keyword_density = round(min(100.0, generic_score + priority_score), 1)
 
     section_presence = 0
-    for section, search_terms in _SECTION_SEARCH_TERMS.items():
+    for _section, search_terms in _SECTION_SEARCH_TERMS.items():
         if any(term in resume_lower for term in search_terms):
             section_presence += 20
 
-    qualitative_prompt = f"""
+    missing_source = priority_terms if priority_terms else list(set(jd_terms))
+    missing_keywords = [term for term in missing_source if term not in resume_lower][:10]
+
+    ats_score = round(min(100.0, keyword_density + section_presence * 0.5), 1)
+
+    summary = (
+        f"Keyword density {keyword_density:.0f}; "
+        f"sections {section_presence}/100; "
+        f"missing {len(missing_keywords)} priority terms."
+    )
+    if qualitative:
+        try:
+            from core.llm_client import llm_client
+
+            qualitative_prompt = f"""
 Review the candidate resume below against the job description. Use only the resume text and job description text supplied. Provide a short qualitative assessment and a list of missing keywords.
 Resume:
 {resume_text}
@@ -125,13 +143,10 @@ Resume:
 Job Description:
 {jd_text}
 """
-    qualitative = llm_client.generate(qualitative_prompt)
+            summary = (llm_client.generate(qualitative_prompt) or summary)[:400]
+        except Exception:
+            pass
 
-    missing_source = priority_terms if priority_terms else list(set(jd_terms))
-    missing_keywords = [term for term in missing_source if term not in resume_lower][:10]
-
-    ats_score = round(min(100.0, keyword_density + section_presence * 0.5), 1)
-    summary = qualitative[:400]
     return ats_score, summary, missing_keywords
 
 

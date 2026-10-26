@@ -21,15 +21,19 @@ def run_migration() -> None:
     Base.metadata.create_all(bind=engine)
 
     _add_column_if_missing("job_descriptions", "content_hash", "content_hash VARCHAR(64)")
+    _add_column_if_missing("job_descriptions", "source_url", "source_url VARCHAR(2000)")
     _add_column_if_missing("resume_versions", "match_score", "match_score FLOAT")
     _add_column_if_missing("resume_versions", "ats_score", "ats_score FLOAT")
     _add_column_if_missing("tailoring_sessions", "match_score", "match_score FLOAT")
+    _add_column_if_missing("tailoring_sessions", "agent_progress_json", "agent_progress_json TEXT")
+    _add_column_if_missing(
+        "tailoring_sessions", "generated_resume_markdown", "generated_resume_markdown TEXT"
+    )
     _add_column_if_missing("profiles", "master_resume_raw_text", "master_resume_raw_text TEXT")
     _add_column_if_missing("profiles", "master_resume_filename", "master_resume_filename VARCHAR(300)")
     _add_column_if_missing("profiles", "structured_profile_json", "structured_profile_json TEXT")
     _add_column_if_missing("profiles", "template_config_json", "template_config_json TEXT")
     _add_column_if_missing("profiles", "profile_source", "profile_source VARCHAR(50)")
-
     with SessionLocal() as session:
         for version in session.query(ResumeVersion).all():
             if version.match_score is not None and not isinstance(version.match_score, (int, float)):
@@ -50,8 +54,6 @@ def run_migration() -> None:
         for setting in session.query(Settings).all():
             if setting.provider is None:
                 setting.provider = "groq"
-            if setting.match_threshold is None:
-                setting.match_threshold = 70
 
         session.commit()
 

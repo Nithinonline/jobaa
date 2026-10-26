@@ -119,6 +119,7 @@ class MatchResult:
     missing_required: list[str] = field(default_factory=list)
     matched_preferred: list[str] = field(default_factory=list)
     missing_preferred: list[str] = field(default_factory=list)
+    transferable: list[str] = field(default_factory=list)
     components: dict[str, float | None] = field(default_factory=dict)
 
     @property
@@ -465,6 +466,7 @@ def compute_match_result(
         missing_required=missing_req,
         matched_preferred=matched_pref,
         missing_preferred=missing_pref,
+        transferable=list(matched_pref),
         components={
             "required": round(required_score, 1),
             "preferred": round(preferred_score, 1),

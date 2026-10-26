@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from core.llm_client import llm_client
-
 if TYPE_CHECKING:
     from db.models import JobDescription
 
@@ -51,28 +49,6 @@ class ParsedJobDescription(BaseModel):
         return [str(value).strip()]
 
 
-def _extract_json_object(text: str) -> dict[str, Any]:
-    text = text.strip()
-    if not text:
-        return {}
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        try:
-            parsed = json.loads(match.group(0))
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-    return {}
-
-
 def _serialize_list(values: list[str]) -> str:
     return json.dumps(values)
 
@@ -87,31 +63,6 @@ def _deserialize_list(value: str | None) -> list[str]:
     except json.JSONDecodeError:
         pass
     return [part.strip() for part in re.split(r"[,;\n]", value) if part.strip()]
-
-
-def parse_job_description(raw_text: str) -> ParsedJobDescription:
-    """Extract structured fields from a job description via LLM."""
-    prompt = f"""You are extracting a structured job description. Use only the supplied text.
-Return ONLY valid JSON with these fields:
-- title (string)
-- required_skills (array of strings)
-- preferred_skills (array of strings)
-- experience_years (string, e.g. "3-5 years")
-- technologies (array of strings)
-- responsibilities (array of strings)
-- keywords (array of strings — important ATS terms from the JD)
-
-Job Description:
-{raw_text}
-"""
-    llm_output = llm_client.generate(prompt)
-    data = _extract_json_object(llm_output)
-    if not data:
-        return ParsedJobDescription()
-    try:
-        return ParsedJobDescription.model_validate(data)
-    except Exception:
-        return ParsedJobDescription()
 
 
 def parsed_to_db_fields(parsed: ParsedJobDescription) -> dict[str, str]:

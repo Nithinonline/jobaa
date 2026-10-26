@@ -29,10 +29,11 @@ def load_config() -> dict[str, Any]:
     return _resolve_env_vars(raw_config)
 
 
-def get_thresholds() -> dict[str, int | float]:
-    thresholds = load_config().get("thresholds", {})
+def get_embeddings_config() -> dict[str, Any]:
+    cfg = load_config().get("embeddings", {})
     return {
-        "match_score": int(thresholds.get("match_score", 70)),
-        "ats_score": float(thresholds.get("ats_score", 95)),
-        "max_iterations": int(thresholds.get("max_iterations", 3)),
+        "model": str(cfg.get("model", "all-MiniLM-L6-v2")),
+        "chroma_path": str(cfg.get("chroma_path", "./chroma_data")),
+        "collection": str(cfg.get("collection", "master_resume_chunks")),
+        "n_results": int(cfg.get("n_results", 5)),
     }

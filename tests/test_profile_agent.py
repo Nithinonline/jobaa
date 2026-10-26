@@ -1,26 +1,17 @@
-"""Tests for profile schema, diff, matcher, template extractor, and agent helpers."""
+"""Tests for profile schema, matching, and template helpers."""
 
 from __future__ import annotations
 
 from core.ats_constants import ContactInfo
 from core.matcher import compute_match_score
-from core.profile_diff import (
-    annotate_proposal_groundedness,
-    skill_in_profile,
-    text_grounded_in_profile,
-)
+from core.profile_diff import skill_in_profile
 from core.profile_schema import (
     ExperienceEntry,
     ProfileData,
     profile_data_from_json,
 )
-from core.proposals import ProposedChange
 from core.template_config import TemplateConfig, template_config_from_json
 
-from core.resume_agent import (
-    apply_approved_to_profile_pool,
-    proposals_all_resolved,
-)
 from core.resume_parser import profile_from_legacy_fields
 from core.template_extractor import _infer_order_from_text, _normalize_section_order
 
@@ -104,27 +95,6 @@ def test_skill_in_profile() -> None:
     assert not skill_in_profile("Kubernetes", profile)
 
 
-def test_text_grounded_in_profile() -> None:
-    profile = _sample_profile()
-    assert text_grounded_in_profile("Built APIs with Python and SQL", profile)
-    assert not text_grounded_in_profile("Led quantum teleportation research with lasers", profile, min_overlap=0.5)
-
-
-def test_annotate_add_skill_requires_confirmation() -> None:
-    profile = _sample_profile()
-    proposal = ProposedChange(
-        id="p1",
-        type="add_skill",
-        description='Add skill "Kubernetes"',
-        suggested_text="Kubernetes",
-        grounded_in_profile=True,
-        requires_confirmation=False,
-    )
-    annotated = annotate_proposal_groundedness(proposal, profile)
-    assert annotated.grounded_in_profile is False
-    assert annotated.requires_confirmation is True
-
-
 def test_match_score_prefers_overlapping_skills() -> None:
     profile = _sample_profile()
     score, matched, missing = compute_match_score(
@@ -164,41 +134,6 @@ def test_template_config_from_json() -> None:
     assert cfg.primary_color == "#112233"
     assert cfg.font_family == "Helvetica"
     assert cfg.section_order[0] == "Skills"
-
-
-def test_proposals_all_resolved() -> None:
-    pending = [
-        ProposedChange(id="1", type="add_skill", description="x", status="pending"),
-        ProposedChange(id="2", type="add_skill", description="y", status="approved"),
-    ]
-    assert proposals_all_resolved(pending) is False
-    pending[0] = pending[0].model_copy(update={"status": "rejected"})
-    assert proposals_all_resolved(pending) is True
-
-
-def test_apply_approved_adds_skill_and_excludes_role() -> None:
-    profile = _sample_profile()
-    proposals = [
-        ProposedChange(
-            id="s1",
-            type="add_skill",
-            description="Add K8s",
-            suggested_text="Kubernetes",
-            status="approved",
-        ),
-        ProposedChange(
-            id="e1",
-            type="exclude_role",
-            description="Exclude intern",
-            suggested_text="exp-3",
-            target_entry_id="exp-3",
-            status="approved",
-        ),
-    ]
-    constrained = apply_approved_to_profile_pool(profile, proposals)
-    assert "Kubernetes" in constrained.skills
-    assert all(e.id != "exp-3" for e in constrained.experience)
-    assert any(e.id == "exp-1" for e in constrained.experience)
 
 
 def test_default_template_config() -> None:

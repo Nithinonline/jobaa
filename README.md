@@ -1,223 +1,121 @@
 # Joba
 
-AI-powered resume tailoring app that helps job seekers optimize resumes for specific job descriptions. Joba scores profile-to-JD fit, generates ATS-friendly tailored resumes, and tracks version history.
+Joba tailors a resume to a job description using evidence from the user's saved master profile. AI agents research the role, identify relevant profile facts, and create a resume selection plan. The application validates those selections and assembles the resume deterministically; the model does not author new career claims.
 
-**Stack:** Streamlit · Python · SQLite · Groq (or Ollama)
+## What it does
 
----
+- Local account authentication and master-profile management.
+- Master resume import from PDF, DOCX, or text, with structured profile editing.
+- JD input as pasted text, a public HTTPS job-posting link, or an uploaded document.
+- Three CrewAI stages: job research and candidate profiling run concurrently, followed by resume strategy.
+- Live per-agent queued, running, completed, or failed status in the tailoring UI.
+- Deterministic profile-to-JD match and ATS scoring.
+- PDF, DOCX, and Markdown resume exports, plus saved resume history.
 
-## Developer Guide
+Interview preparation, resume proposal review, cover letters, and the former multi-step approval workflow are not part of the current application.
 
-### Prerequisites
+## Requirements
 
-| Requirement | Minimum | Recommended |
-|-------------|---------|-------------|
-| Python | 3.8+ | 3.10+ |
-| RAM | 2 GB | 8 GB |
-| Disk | 1 GB | 5 GB |
-| API key | [Groq API key](https://console.groq.com) (free tier available) | — |
+- Python 3.10 through 3.13 (CrewAI currently does not support Python 3.14)
+- A Groq API key, or an Ollama service and locally available model
+- Git and pip
 
-You also need `git` and `pip`.
-
----
-
-### 1. Clone and enter the project
-
-```bash
-git clone <repository-url>
-cd jobaa
-```
-
----
-
-### 2. Create and activate a virtual environment
-
-**Windows (PowerShell)**
+## Setup
 
 ```powershell
-python -m venv .venv
+git clone <repository-url>
+cd jobaa
+# Use an installed Python 3.10–3.13 runtime; 3.11 is a good default.
+py -3.11 -m venv .venv
 .venv\Scripts\Activate.ps1
-```
-
-**macOS / Linux**
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
----
-
-### 3. Install dependencies
-
-```bash
-pip install --upgrade pip
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
----
-
-### 4. Configure environment variables
-
-Create a `.env` file in the project root (this file is gitignored):
+Create a `.env` file in the project root:
 
 ```env
-GROQ_API_KEY=gsk_your_key_here
+GROQ_API_KEY=your_groq_api_key
 ```
 
-Get a key from the [Groq Console](https://console.groq.com).
+The key is required when using Groq. To use Ollama instead, install Ollama, pull a supported model (for example `ollama pull llama3.2`), start its service, and set `llm.provider` to `ollama` in `config.yaml`.
 
-**Alternative (session only, PowerShell):**
+Initialize the database if needed, then start the UI:
 
 ```powershell
-$env:GROQ_API_KEY = "gsk_your_key_here"
-```
-
-**Optional variables**
-
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `GROQ_API_KEY` | Groq LLM API authentication | — |
-| `JOBAA_DB_PATH` | Custom SQLite database path | `./joba.db` |
-
-LLM settings can also be changed in `config.yaml` (provider, model, score thresholds).
-
----
-
-### 5. Initialize the database
-
-The database is created automatically when the app starts. To initialize it manually:
-
-```bash
 python -c "from db.session import init_db; init_db()"
-```
-
-This creates `joba.db` in the project root (unless `JOBAA_DB_PATH` is set).
-
----
-
-### 6. Run the application
-
-```bash
 streamlit run app.py
 ```
 
-Open [http://localhost:8501](http://localhost:8501) in your browser.
+Open http://localhost:8501.
 
-**Debug logging (optional):**
+## Tailoring flow
 
-```bash
-streamlit run app.py --logger.level=debug
-```
+1. Create an account and add or import a master resume.
+2. Provide a job description as text, a public HTTPS posting URL, or a PDF/DOCX/TXT file.
+3. Start tailoring once. Joba stores task progress and displays each agent's state:
+   - **Job Posting Researcher** extracts the role requirements.
+   - **Candidate Profiler** identifies relevant existing skills and source entries. It runs in parallel with job research.
+   - **Resume Strategist** selects and orders verified facts from the profile.
+4. Joba validates the selections, assembles the resume, scores the result, and saves a version.
+5. Export the result or retrieve it later from history.
 
----
+The researcher and profiler receive the supplied JD and profile as data, not instructions. Resume content is assembled from selected source facts; invalid or unsupported skill and profile-entry selections fail the task instead of being accepted.
 
-### 7. First-time app workflow
-
-1. **Sign up** — create a local account on the login screen.
-2. **Master resume** — upload a multi-page PDF/DOCX/TXT master resume (or fill the manual form). Review the parsed profile and template cues, then save.
-3. **Upload JD** — paste text or upload a PDF/DOCX job description.
-4. **Tailoring agent** — review proposed changes (new skills, bullet rewrites, role inclusion). Approve, reject, or edit each item. Anything not in your master resume requires confirmation.
-5. **Match score** — if profile–JD fit is below the threshold (default 70%), acknowledge to continue.
-6. **Generate resume** — create a constrained one-page ATS PDF that follows your master template section order/style.
-7. **History** — browse and reload saved resume versions from the sidebar.
-
----
-
-### 8. Run tests
-
-From the project root with the virtual environment active:
-
-```bash
-pip install pytest
-pytest tests/ -v
-```
-
-Run a single test file:
-
-```bash
-pytest tests/test_ats_scorer.py -v
-```
-
----
+Job posting links must use HTTPS on the standard port and resolve only to public IP addresses. The fetcher follows at most three validated redirects and limits downloaded content to 2 MB. Some job sites block automated requests; paste the job description or upload a document in that case.
 
 ## Configuration
 
-Edit `config.yaml` to change LLM provider, models, and scoring thresholds:
+Edit `config.yaml` for the model provider, model names, embedding model, and local Chroma paths. User-level provider/model/API settings can override the defaults.
 
 ```yaml
 llm:
-  provider: "groq"          # or "ollama"
+  provider: "groq" # or "ollama"
   groq:
-    model: "llama-3.1-8b-instant"
+    model: "openai/gpt-oss-120b"
     api_key: "${GROQ_API_KEY}"
   ollama:
     model: "llama3.2"
     base_url: "http://localhost:11434"
 
-thresholds:
-  match_score: 70           # minimum fit score to generate a resume
-  ats_score: 95             # target ATS score during generation
-  max_iterations: 3         # resume refinement loops
+embeddings:
+  model: "all-MiniLM-L6-v2"
+  chroma_path: "./chroma_data"
+  collection: "master_resume_chunks"
+  n_results: 5
 ```
 
-### Using Ollama instead of Groq
+`JOBAA_DB_PATH` optionally selects a SQLite database path. Keep `.env`, database files, Chroma data, and uploaded resume files out of source control.
 
-1. Install [Ollama](https://ollama.ai) and pull a model: `ollama pull llama3.2`
-2. Start the server: `ollama serve`
-3. Set `provider: "ollama"` in `config.yaml`
+## Tests
 
----
-
-## Project structure
-
-```
-jobaa/
-├── app.py                 # Main Streamlit entry point (master resume + agent UI)
-├── config.yaml            # LLM and threshold configuration
-├── requirements.txt       # Python dependencies
-├── auth/                  # Login and signup
-├── core/                  # Resume agent, parsing, matching, ATS, PDF export
-│   ├── resume_parser.py   # Master resume → structured ProfileData
-│   ├── template_extractor.py
-│   ├── resume_agent.py    # Proposals + constrained generation
-│   ├── profile_diff.py    # Groundedness / confirmation checks
-│   ├── matcher.py         # Weighted profile–JD match (skills/title/years)
-│   ├── resume_generator.py
-│   ├── pdf_exporter.py    # One-page ATS PDF (ReportLab + TemplateConfig)
-│   └── ...
-├── db/                    # SQLAlchemy models and SQLite session
-├── pages/                 # Legacy Streamlit page modules (unused by app.py)
-└── tests/                 # Pytest test suite
+```powershell
+pip install pytest
+pytest tests/ -v
 ```
 
----
+## Project layout
+
+```text
+app.py                    Streamlit UI and tailoring progress
+core/application_crew.py  CrewAI stages, output validation, resume selection
+core/job_source.py        JD normalization and safe public-link fetching
+core/services/            Profile, tailoring, and export orchestration
+core/resume_assembler.py  Deterministic resume Markdown assembly
+core/matcher.py           Profile-to-JD match scoring
+core/ats_scorer.py        ATS scoring
+core/retriever.py         Hybrid profile evidence retrieval
+db/                       SQLAlchemy models, sessions, and migrations
+tests/                    Unit and workflow tests
+```
 
 ## Troubleshooting
 
-| Issue | Fix |
-|-------|-----|
-| `Groq API key not configured` | Set `GROQ_API_KEY` in `.env` or as an environment variable |
-| `Ollama service not available` | Run `ollama serve` in a separate terminal |
-| `Database is locked` | Close other processes using `joba.db`, or set `JOBAA_DB_PATH` to a new file |
-| PDF export fails | Ensure `reportlab` is installed: `pip install reportlab` |
-| PDF text extraction fails | Use a PDF with selectable text, not a scanned image |
-| Master resume parse fails | Prefer DOCX when possible; review/edit the structured form before saving |
-| Generate button disabled | Resolve all pending agent proposals; acknowledge low match if shown |
-
----
-
-## Additional documentation
-
-| Document | Description |
-|----------|-------------|
-| [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Algorithms, data models, and quick commands |
-| [TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md) | Full architecture and API details |
-| [ARCHITECTURE_GUIDE.md](ARCHITECTURE_GUIDE.md) | System design overview |
-| [API_INTEGRATION_GUIDE.md](API_INTEGRATION_GUIDE.md) | Integration patterns for auth and core modules |
-
----
-
-## License
-
-Add your license information here.
+| Problem | Check |
+|---|---|
+| Missing Groq API key | Set `GROQ_API_KEY` in `.env`, or choose Ollama. |
+| Ollama is unavailable | Start `ollama serve` and check the configured base URL/model. |
+| Job link cannot be fetched | Use HTTPS on port 443; if the site blocks requests, paste or upload the JD. |
+| Tailoring fails | Read the failed agent's progress detail and check provider settings/profile completeness. |
+| PDF export fails | Ensure ReportLab is installed and the profile contains exportable content. |
+| Database is locked | Close other processes using the SQLite database or select another `JOBAA_DB_PATH`. |

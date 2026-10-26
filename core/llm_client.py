@@ -48,29 +48,23 @@ class LLMClient:
             raw_config = yaml.safe_load(handle) or {}
         return self._resolve_env_vars(raw_config)
 
-    def _load_runtime_settings(self) -> tuple[str, str, str]:
+    def get_runtime_settings(self) -> tuple[str, str, str]:
         provider = self.provider
         model = self.groq_model if provider == "groq" else self.ollama_model
         api_key = self.groq_api_key
 
-        try:
-            user = getattr(st.session_state, "user", None)
-            if user is not None:
-                from db.models import Settings
-                from db.session import SessionLocal
+        user = st.session_state.get("user")
+        if user is not None:
+            from db.models import Settings
+            from db.session import SessionLocal
 
-                session = SessionLocal()
-                try:
-                    settings = session.query(Settings).filter(Settings.user_id == user.id).first()
-                    if settings:
-                        provider = settings.provider or provider
-                        model = settings.model or model
-                        if settings.api_key_encrypted:
-                            api_key = self._decrypt_secret(settings.api_key_encrypted)
-                finally:
-                    session.close()
-        except Exception:
-            pass
+            with SessionLocal() as session:
+                settings = session.query(Settings).filter(Settings.user_id == user.id).first()
+                if settings:
+                    provider = settings.provider or provider
+                    model = settings.model or model
+                    if settings.api_key_encrypted:
+                        api_key = self._decrypt_secret(settings.api_key_encrypted)
 
         return provider, model, api_key
 
@@ -104,7 +98,7 @@ class LLMClient:
         return ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "mixtral-8x7b-32768"]
 
     def generate(self, prompt: str) -> str:
-        provider, model, api_key = self._load_runtime_settings()
+        provider, model, api_key = self.get_runtime_settings()
         if provider == "ollama":
             return self._generate_with_ollama(prompt, model)
         return self._generate_with_groq(prompt, model, api_key)

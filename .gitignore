@@ -67,6 +67,9 @@ coverage.xml
 .huggingface/
 models/
 
+# Chroma vector store (local persistent index)
+chroma_data/
+
 # Streamlit
 .streamlit/cache/
 

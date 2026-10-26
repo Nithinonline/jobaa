@@ -5,7 +5,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from core.jd_parser import parse_job_description, parsed_to_db_fields
+from core.jd_parser import ParsedJobDescription, parsed_to_db_fields
 from db.models import JobDescription
 
 
@@ -29,27 +29,42 @@ def get_or_create_job_description(
     user_id: int,
     raw_text: str,
     title: str,
+    *,
+    source_url: str | None = None,
+    parsed: ParsedJobDescription | None = None,
 ) -> JobDescription:
     cached = find_cached_job_description(session, user_id, raw_text)
     if cached is not None:
+        if title and title != "Untitled role":
+            cached.title = title
+        if source_url:
+            cached.source_url = source_url
+        if parsed:
+            _apply_parsed_job_description(cached, parsed)
+        session.commit()
+        session.refresh(cached)
         return cached
 
-    parsed = parse_job_description(raw_text)
-    db_fields = parsed_to_db_fields(parsed)
+    parsed = parsed or ParsedJobDescription(title=title or "Untitled role")
     content_hash = hash_text(raw_text)
     jd = JobDescription(
         user_id=user_id,
         title=title or parsed.title or "Untitled role",
         raw_text=raw_text,
         content_hash=content_hash,
-        skills=db_fields["skills"],
-        preferred_skills=db_fields["preferred_skills"],
-        experience=db_fields["experience"],
-        technologies=db_fields["technologies"],
-        responsibilities=db_fields["responsibilities"],
-        keywords=db_fields["keywords"],
+        source_url=source_url,
     )
+    _apply_parsed_job_description(jd, parsed)
     session.add(jd)
     session.commit()
     session.refresh(jd)
     return jd
+
+
+def _apply_parsed_job_description(
+    jd: JobDescription,
+    parsed: ParsedJobDescription,
+) -> None:
+    for field, value in parsed_to_db_fields(parsed).items():
+        setattr(jd, field, value)
+    jd.title = parsed.title or jd.title

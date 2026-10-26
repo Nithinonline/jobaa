@@ -8,12 +8,6 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from core.ats_constants import ContactInfo
-from core.proposals import (  # re-export
-    ProposalStatus,
-    ProposalType,
-    ProposedChange,
-    proposals_from_json,
-)
 from core.template_config import TemplateConfig, template_config_from_json  # re-export
 
 __all__ = [
@@ -21,12 +15,8 @@ __all__ = [
     "SkillCategory",
     "ProfileData",
     "TemplateConfig",
-    "ProposalType",
-    "ProposalStatus",
-    "ProposedChange",
     "profile_data_from_json",
     "template_config_from_json",
-    "proposals_from_json",
 ]
 
 
