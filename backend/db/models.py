@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    profile: Mapped[Optional["Profile"]] = relationship(back_populates="user", uselist=False)
+    settings: Mapped[Optional["Settings"]] = relationship(back_populates="user", uselist=False)
+    job_descriptions: Mapped[list["JobDescription"]] = relationship(back_populates="user")
+    resume_versions: Mapped[list["ResumeVersion"]] = relationship(back_populates="user")
+    tailoring_sessions: Mapped[list["TailoringSession"]] = relationship(back_populates="user")
+    job_listings: Mapped[list["JobListing"]] = relationship(back_populates="user")
+
+
+class Profile(Base):
+    __tablename__ = "profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, nullable=False)
+    full_name: Mapped[Optional[str]] = mapped_column(String(200))
+    email: Mapped[Optional[str]] = mapped_column(String(200))
+    phone: Mapped[Optional[str]] = mapped_column(String(50))
+    location: Mapped[Optional[str]] = mapped_column(String(200))
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    skills: Mapped[Optional[str]] = mapped_column(Text)
+    experience: Mapped[Optional[str]] = mapped_column(Text)
+    projects: Mapped[Optional[str]] = mapped_column(Text)
+    education: Mapped[Optional[str]] = mapped_column(Text)
+    certifications: Mapped[Optional[str]] = mapped_column(Text)
+    achievements: Mapped[Optional[str]] = mapped_column(Text)
+    github: Mapped[Optional[str]] = mapped_column(String(300))
+    linkedin: Mapped[Optional[str]] = mapped_column(String(300))
+    portfolio: Mapped[Optional[str]] = mapped_column(String(300))
+    master_resume_raw_text: Mapped[Optional[str]] = mapped_column(Text)
+    master_resume_filename: Mapped[Optional[str]] = mapped_column(String(300))
+    master_resume_mime_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    master_resume_bytes: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    master_page_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    layout_profile_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    structured_profile_json: Mapped[Optional[str]] = mapped_column(Text)
+    template_config_json: Mapped[Optional[str]] = mapped_column(Text)
+    profile_source: Mapped[Optional[str]] = mapped_column(String(50), default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="profile")
+
+
+class Settings(Base):
+    __tablename__ = "settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, nullable=False)
+    provider: Mapped[str] = mapped_column(String(50), default="groq")
+    model: Mapped[Optional[str]] = mapped_column(String(100))
+    api_key_encrypted: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="settings")
+
+
+class JobDescription(Base):
+    __tablename__ = "job_descriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(String(200))
+    raw_text: Mapped[Optional[str]] = mapped_column(Text)
+    source_url: Mapped[Optional[str]] = mapped_column(String(2000))
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64))
+    skills: Mapped[Optional[str]] = mapped_column(Text)
+    preferred_skills: Mapped[Optional[str]] = mapped_column(Text)
+    experience: Mapped[Optional[str]] = mapped_column(Text)
+    technologies: Mapped[Optional[str]] = mapped_column(Text)
+    responsibilities: Mapped[Optional[str]] = mapped_column(Text)
+    keywords: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="job_descriptions")
+    resume_versions: Mapped[list["ResumeVersion"]] = relationship(back_populates="job_description")
+
+
+class ResumeVersion(Base):
+    __tablename__ = "resume_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    job_description_id: Mapped[Optional[int]] = mapped_column(ForeignKey("job_descriptions.id"))
+    version_name: Mapped[Optional[str]] = mapped_column(String(100))
+    markdown_content: Mapped[Optional[str]] = mapped_column(Text)
+    tailored_document_bytes: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    tailored_format: Mapped[str] = mapped_column(String(20), default="pdf", nullable=False)
+    page_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    layout_diff_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    match_score: Mapped[Optional[float]] = mapped_column(Float)
+    ats_score: Mapped[Optional[float]] = mapped_column(Float)
+    improvement_summary: Mapped[Optional[str]] = mapped_column(Text)
+    missing_keywords: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="resume_versions")
+    job_description: Mapped[Optional["JobDescription"]] = relationship(back_populates="resume_versions")
+
+
+class TailoringSession(Base):
+    __tablename__ = "tailoring_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    job_description_id: Mapped[Optional[int]] = mapped_column(ForeignKey("job_descriptions.id"))
+    status: Mapped[str] = mapped_column(String(50), default="running")
+    agent_progress_json: Mapped[Optional[str]] = mapped_column(Text)
+    generated_resume_markdown: Mapped[Optional[str]] = mapped_column(Text)
+    match_score: Mapped[Optional[float]] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="tailoring_sessions")
+    job_description: Mapped[Optional["JobDescription"]] = relationship()
+
+
+class JobListing(Base):
+    __tablename__ = "job_listings"
+    __table_args__ = (
+        UniqueConstraint("user_id", "url_hash", name="uq_job_listings_user_url_hash"),
+        CheckConstraint(
+            "status IN ('new', 'saved', 'applied', 'ignored')",
+            name="ck_job_listings_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    url_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    url: Mapped[str] = mapped_column(String(2000), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    company: Mapped[str] = mapped_column(String(300), nullable=False)
+    location: Mapped[Optional[str]] = mapped_column(String(300))
+    remote: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    posted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    jd_text: Mapped[str] = mapped_column(Text, nullable=False)
+    match_score: Mapped[Optional[float]] = mapped_column(Float)
+    fit_note: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="new", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="job_listings")

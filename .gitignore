@@ -101,6 +101,16 @@ Desktop.ini
 # Cursor
 .agents/
 
+# Workspace applications
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.env
+/backend/.env
+/backend/__pycache__/
+/backend/*.db
+/backend/*.sqlite
+/backend/*.sqlite3
+
 # Generated resume exports (local dev artifacts)
 resume.tex
 *_preview.png
